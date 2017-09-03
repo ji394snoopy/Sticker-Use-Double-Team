@@ -15,5 +15,3 @@ sleep 5; bin/telegram-cli -k tg-server.pub -W -e 'msg Stickers /publish'
 sleep 5; bin/telegram-cli -k tg-server.pub -W -e 'msg Stickers sudt2'$1
 sleep 5; bin/telegram-cli -k tg-server.pub -W -e 'quit'
 cd ..
-exit 1
-

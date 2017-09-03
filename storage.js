@@ -1,24 +1,16 @@
-const firebase = require('firebase');
+const firebase = require('firebase')
+const config = require('./config')
 
-const config = {
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: ""
-};
+firebase.initializeApp(config.firebase)
 
-firebase.initializeApp(config);
+module.exports.getValueBy = function (ref) {
+  return ref.once('value')
+}
 
-module.exports.getValueBy = function(ref) {
-  return ref.once('value');
-};
+module.exports.setValueWith = function (ref, obj) {
+  return ref.set(obj)
+}
 
-module.exports.setValueWith = function(ref, obj) {
-  return ref.set(obj);
-};
-
-module.exports.getRef = function(query) {
-  return firebase.database().ref(query);
+module.exports.getRef = function (query) {
+  return firebase.database().ref(query)
 }

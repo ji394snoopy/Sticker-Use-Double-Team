@@ -18,5 +18,5 @@
     "telebot": "^1.2.2",
     "telegram-cli": "^0.1.0",
     "tg-cli-node": "0.0.8"
-  },
+  }
 }
