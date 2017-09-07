@@ -4,10 +4,6 @@ const _ = require('./util.js')
 
 const log = console.log
 
-// /////////////////////// //
-// main declare parameter  //
-// /////////////////////// //
-
 // checkFilePath then save
 /**
  * [saving description]

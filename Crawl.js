@@ -6,7 +6,12 @@ const iconv = require('iconv-lite')
 const request = require('request')
 
 const log = console.log
-// functions
+
+/* ********* */
+/* functions */
+/* ********* */
+
+// check crawled file is exist with html body
 const checkFileExist = function (callback) {
   return function (filepath, body) {
     log('check if file exist')
@@ -58,6 +63,14 @@ const encode = function (chunk, coding) {
 }
 
 // exports
+
+module.exports.getFilesInFolder = function (folderPath) {
+  fs.readdir(folderPath, (err, files) => {
+    if (err) return []
+    return files
+  })
+}
+
 module.exports.getUrl = function (str) {
   if (!str) {
     log('no path !')

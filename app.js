@@ -6,6 +6,7 @@ const _ = require('./util')
 const cmd = require('./cmd.js')
 const rImage = require('./resizeImage.js')
 const config = require('./config')
+const crawl = require('./crawl.js')
 
 const bot = new Telebot(config.telebotKey)
 const regHref = /^(http[s]?:\/\/(www\.)?|ftp:\/\/(www\.)?|www\.){1}([0-9A-Za-z-.@:%_+~#=]+)+((\.[a-zA-Z]{2,3})+)(\/(.)*)?( ? (.)*)?/g
@@ -62,8 +63,38 @@ bot.on('file', msg => {
   if (msg.mime_type !== 'application/zip') return bot.sendMessage(msg.user.id, '檔案類型非.zip檔，請轉成可識別格式！')
   if (msg.file_size > 1024 * 1024 * 15) return bot.sendMessage(msg.user.id, '此檔案超出15Mb，請減少至15Ｍb以內！')
 
-  zipClient.processing(msg.file_name, bot.getFile(msg.file_id), function () {
-
+  zipClient.processing(msg.file_name, bot.getFile(msg.file_id), function (error, folderpath, filepath) {
+    if (error) return bot.sendMessage(msg.user.id, '新增檔案錯誤！')
+    _.mkdirParent(folderpath + '/resized', '0777', function (error) {
+      if (error && error.code !== 'EEXIST') {
+        log('error in mkdirParent')
+        log(error)
+        return bot.sendMessage(msg.user.id, '新增檔案錯誤！')
+      }
+      const files = crawl.getFilesInFolder(folderpath)
+      const length = files.length
+      const timestamp = Math.floor(Date.now() / 1000)
+      var count = 0
+      files.forEach((file, index) => {
+        rImage.resizeConst(folderpath + '/' + file + '.png', folderpath + '/resized/' + file + '.png', () => {
+          count += 1
+          if (count === length) {
+            // run Shell Script
+            cmd.runScriptFileOf('bash', 'cmd-tg-bot.sh', timestamp, length - 1,
+              function (line) { // on data
+              },
+              function (line) { // on error
+                return bot.sendMessage(msg.chat.id, 'sorry ! \nthere is some technical issue occur... \nplz message @ji394snoopy')
+              },
+              function (code) { // on close
+                stickerList[timestamp] = 'https://t.me/addstickers/sudt2' + timestamp
+                firebase.setValueWith(dbRef, stickerList)
+                return bot.sendMessage(msg.chat.id, 'DONE ! here is your link: https://t.me/addstickers/sudt2' + timestamp)
+              })
+          }
+        })
+      })
+    })
   })
 })
 
@@ -89,7 +120,7 @@ bot.on(/^\/下載 Line貼圖 (.+)$/, (msg, props) => {
       if (error && error.code !== 'EEXIST') {
         log('error in mkdirParent')
         log(error)
-        return
+        return bot.sendMessage(msg.chat.id, '新增檔案錯誤！')
       }
       var count = 0
       for (var i = 0; i < length; i++) {
