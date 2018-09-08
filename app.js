@@ -1,161 +1,264 @@
-const Telebot = require('TeleBot')
-const lineClient = require('./client-line')
-const zipClient = require('./client-zip.js')
-const firebase = require('./storage')
-const _ = require('./util')
-const cmd = require('./cmd.js')
-const rImage = require('./resizeImage.js')
-const config = require('./config')
-const crawl = require('./crawl.js')
+const Telebot = require('TeleBot');
+const firebase = require('firebase');
 
-const bot = new Telebot(config.telebotKey)
-const regHref = /^(http[s]?:\/\/(www\.)?|ftp:\/\/(www\.)?|www\.){1}([0-9A-Za-z-.@:%_+~#=]+)+((\.[a-zA-Z]{2,3})+)(\/(.)*)?( ? (.)*)?/g
-const log = console.log
-const dbRef = firebase.getRef('/')
+const line = require('./src/spider/line');
+const zip = require('./src/common/zip');
+const utils = require('./src/common/utils');
+// const cmd = require('./cmd.js');
+const resizeImage = require('./src/common/resizeImage');
+const config = require('./src/config');
+const crawl = require('./src/spider/crawl');
+const MSG = require('./src/common/parameters').MSG;
+const getLink = require('./src/common/parameters').getLink;
+const emojis = require('./src/common/emojis');
 
-var stickerList = {}
-var zipList = {}
+const bot = new Telebot(config.TELEBOT_KEY);
+firebase.initializeApp(config.FIREBASE);
+
+const regHref = /^(http[s]?:\/\/(www\.)?|ftp:\/\/(www\.)?|www\.){1}([0-9A-Za-z-.@:%_+~#=]+)+((\.[a-zA-Z]{2,3})+)(\/(.)*)?( ? (.)*)?/g;
+const cLog = console.log;
+const dbRef = firebase.database().ref('/');
+
+let stickerList = {};
+let zipList = {};
+let bufferArray = [];
 
 // get first list
-const getList = function () {
-  firebase.getValueBy(dbRef).then(obj => {
-    let _list = obj.val()
-    log(_list)
-    if (!_list) return log('no data')
-    stickerList = _.cloneJson(_list)
-  }, error => {
-    console.log(error)
-  })
-}
+const getList = function() {
+  dbRef.once('value').then(
+    obj => {
+      let _list = obj.val();
+      cLog(_list);
+      if (!_list) return cLog(MSG.ERR.EMPTY_DATA);
+      stickerList = utils.cloneJson(_list);
+    },
+    error => {
+      console.cLog(error);
+    }
+  );
+};
 
-// bot.on('text',msg => {
-//   log('text')
-//   return bot.sendMessage(msg.from.id,'get text')
-// })
+// do work
+const doWork = (msg, href, _id) => {
+  bot.sendMessage(msg.chat.id, ' start crawl...');
+  line.processing(href, function(info, length, filepath) {
+    if (!info) return bot.sendMessage(msg.chat.id, MSG.ERR.HREF(href));
+    // resize image
+    utils.mkdirParent(filepath + '/resized', '0777', function(error) {
+      if (error && error.code !== 'EEXIST') {
+        cLog(MSG.ERR.MKDIR);
+        cLog(error);
+        return bot.sendMessage(msg.chat.id, MSG.ERR.CREATE);
+      }
+
+      const doneUpload = err => {
+        if (err) {
+          // on error
+          return bot.sendMessage(msg.chat.id, MSG.ERR.SYSTEM);
+        }
+        // on close
+        stickerList[_id] = getLink(_id);
+        // save to firebase
+        // dbRef.set(stickerList);
+        // return success and url
+        return bot.sendMessage(msg.chat.id, MSG.INFO.DONE + getLink(_id));
+      };
+
+      const reSizeThenUpload = (max, cnt) => {
+        if (cnt === undefined) cnt = max - 1;
+        const i = max - cnt;
+
+        resizeImage
+          .resizeConst(
+            `${filepath}/${info.lineID}_${i}.png`,
+            `${filepath}/resized/${info.lineID}_${i}.png`
+          )
+          .then(filePath => {
+            return utils.readFileToInputStream(filePath);
+          })
+          .then(
+            inputStream => {
+              if (i === 1)
+                return bot.createNewStickerSet(
+                  msg.from.id,
+                  `SUDT_${info.lineID}_by_SUDT_bot`,
+                  info.lineTitle,
+                  inputStream,
+                  emojis[i - 1]
+                );
+              else
+                return bot.addStickerToSet(
+                  msg.from.id,
+                  `SUDT_${info.lineID}_by_SUDT_bot`,
+                  inputStream,
+                  emojis[i - 1]
+                );
+            },
+            err => {
+              cLog(err);
+              doneUpload(MSG.ERR.SYSTEM);
+            }
+          )
+          .then(
+            () => {
+              if (--cnt > -1) reSizeThenUpload(max, cnt);
+              else {
+                cLog('done upload');
+                doneUpload();
+              }
+            },
+            err => {
+              cLog('error upload: ', err);
+            }
+          );
+      };
+      reSizeThenUpload(length);
+    });
+  });
+};
+
+/* webhook */
+
+bot.on('text', msg => {
+  cLog('text');
+  // const is = fs.createReadStream(
+  //   './crawledFile/我就是故意用錯字啦！/zh-Hant_0.png'
+  // );
+  // bot.sendPhoto(msg.chat.id, is);
+  return bot.sendMessage(msg.from.id, 'get text');
+});
 
 bot.on(/^\/顯示$/, msg => {
-  log('ls stickers')
-  let _stickerList = _.cloneJson(stickerList)
-  var ls = ''
-  var count = 0
-  for (var key in _stickerList) {
-    count += 1
-    ls += count + ') ' + key + ' -> ' + _stickerList[key] + ' \n\n'
+  cLog('ls stickers');
+  let _stickerList = utils.cloneJson(stickerList);
+  let ls = '';
+  let count = 0;
+  for (let key in _stickerList) {
+    if (!_stickerList.hasOwnProperty(key)) {
+      continue;
+    }
+    count += 1;
+    ls += count + ') ' + key + ' -> ' + _stickerList[key] + ' \n\n';
   }
-  return bot.sendMessage(msg.chat.id, 'these are all stickers I\'ve saved:\n' + ls)
-})
+  return bot.sendMessage(
+    msg.chat.id,
+    "these are all stickers I've saved:\n" + ls
+  );
+});
 
 // add stickers to developer
-bot.on(/^\/上傳 貼圖$/, (msg, prop) => {
-  bot.sendMessage(msg.user.id, '請上傳.zip檔，檔案大小不得超過15Ｍb!')
+bot.on(/^\/上傳 貼圖$/, msg => {
+  bot.sendMessage(msg.user.id, MSG.INFO.ZIP_SIZE);
   if (zipList[msg.user.id] && zipList[msg.user.id].isBusy) {
     // stop do work
+    cLog(MSG.ERR.IS_BUSY);
   } else {
     zipList[msg.user.id] = {
       isBusy: false,
       gonnaWork: true
-    }
+    };
   }
-})
+});
 
+/**
+ * create sticker set by zip file
+ */
 bot.on('file', msg => {
-  if (!zipList[msg.user.id] || zipList[msg.user.id].gonnaWork) return
-  if (msg.mime_type !== 'application/zip') return bot.sendMessage(msg.user.id, '檔案類型非.zip檔，請轉成可識別格式！')
-  if (msg.file_size > 1024 * 1024 * 15) return bot.sendMessage(msg.user.id, '此檔案超出15Mb，請減少至15Ｍb以內！')
+  if (!zipList[msg.user.id] || zipList[msg.user.id].gonnaWork) return;
+  if (msg.mime_type !== 'application/zip')
+    return bot.sendMessage(msg.user.id, MSG.ERR.ZIP_MIME);
+  if (msg.file_size > 1024 * 1024 * 15)
+    return bot.sendMessage(msg.user.id, MSG.ERR.ZIP_OVER_SIZE);
 
-  zipClient.processing(msg.file_name, bot.getFile(msg.file_id), function (error, folderpath, filepath) {
-    if (error) return bot.sendMessage(msg.user.id, '新增檔案錯誤！')
-    _.mkdirParent(folderpath + '/resized', '0777', function (error) {
+  zip.processing(msg.file_name, bot.getFile(msg.file_id), function(
+    error,
+    folderpath
+  ) {
+    if (error) return bot.sendMessage(msg.user.id, MSG.ERR.CREATE);
+    utils.mkdirParent(folderpath + '/resized', '0777', function(error) {
       if (error && error.code !== 'EEXIST') {
-        log('error in mkdirParent')
-        log(error)
-        return bot.sendMessage(msg.user.id, '新增檔案錯誤！')
+        cLog('error in mkdirParent');
+        cLog(error);
+        return bot.sendMessage(msg.user.id, MSG.ERR.CREATE);
       }
-      const files = crawl.getFilesInFolder(folderpath)
-      const length = files.length
-      const timestamp = Math.floor(Date.now() / 1000)
-      var count = 0
-      files.forEach((file, index) => {
-        rImage.resizeConst(folderpath + '/' + file + '.png', folderpath + '/resized/' + file + '.png', () => {
-          count += 1
-          if (count === length) {
-            // run Shell Script
-            cmd.runScriptFileOf('bash', 'cmd-tg-bot.sh', timestamp, length - 1,
-              function (line) { // on data
-              },
-              function (line) { // on error
-                return bot.sendMessage(msg.chat.id, 'sorry ! \nthere is some technical issue occur... \nplz message @ji394snoopy')
-              },
-              function (code) { // on close
-                stickerList[timestamp] = 'https://t.me/addstickers/sudt2' + timestamp
-                firebase.setValueWith(dbRef, stickerList)
-                return bot.sendMessage(msg.chat.id, 'DONE ! here is your link: https://t.me/addstickers/sudt2' + timestamp)
-              })
+      const files = crawl.getFilesInFolder(folderpath);
+      const length = files.length;
+      const timestamp = Math.floor(Date.now() / 1000);
+      let count = 0;
+      files.forEach(file => {
+        resizeImage.resizeConst(
+          `${folderpath}/${file}.png`,
+          `${folderpath}/resized/${file}.png`,
+          () => {
+            count += 1;
+            if (count === length) {
+              // run Shell Script
+              // cmd.runScriptFileOf(
+              //   'bash',
+              //   'cmd-tg-bot.sh',
+              //   timestamp,
+              //   length - 1,
+              //   function() {
+              //     // on data
+              //   },
+              //   function() {
+              //     // on error
+              //     return bot.sendMessage(msg.chat.id, MSG.ERR.SYSTEM);
+              //   },
+              //   function() {
+              //     // on close
+              //     stickerList[timestamp] = getLink(timestamp);
+              //     dbRef.set(stickerList);
+              //     return bot.sendMessage(
+              //       msg.chat.id,
+              //       MSG.INFO.DONE + getLink(timestamp)
+              //     );
+              //   }
+              // );
+            }
           }
-        })
-      })
-    })
-  })
-})
+        );
+      });
+    });
+  });
+});
 
 // add stickers to user
-bot.on(/^\/上傳 自己的貼圖$/)
+bot.on(/^\/上傳 自己的貼圖$/);
 
-bot.on(/^\/下載 Line貼圖 (.+)$/, (msg, props) => {
-  let href = props.match[1]
-  if (href === 'ls') return
-  var hrefArr = href.split('/')
-  let _id = hrefArr.pop()
-  if (!parseInt(_id)) _id = hrefArr.pop()
+/**
+ * create sticker set from line href
+ */
+bot.on(/^(\/下載Line貼圖 |){1}(\w.+)$/, (msg, props) => {
+  cLog(JSON.stringify(msg));
 
-  if (!href.match(regHref)) return bot.sendMessage(msg.chat.id, '[' + href + '] is not a valid url. \nplz try another one!')
+  const href = props.match[2];
+  // todo: only id
+  if (!href.match(regHref))
+    return bot.sendMessage(msg.chat.id, MSG.ERR.HREF(href));
+
+  let hrefArr = href.split('/');
+  let _id = hrefArr.pop();
+  while (!_id || !parseInt(_id)) {
+    _id = hrefArr.pop();
+  }
+  if (!_id) return bot.sendMessage(msg.chat.id, MSG.ERR.HREF(href));
 
   // query if exist
-  if (stickerList[_id]) return bot.sendMessage(msg.chat.id, stickerList[_id])
+  if (stickerList[_id]) return bot.sendMessage(msg.chat.id, stickerList[_id]);
 
-  bot.sendMessage(msg.chat.id, ' start crawl...')
-  lineClient.processing(href, function (length, filepath) {
-    // resize image
-    _.mkdirParent(filepath + '/resized', '0777', function (error) {
-      if (error && error.code !== 'EEXIST') {
-        log('error in mkdirParent')
-        log(error)
-        return bot.sendMessage(msg.chat.id, '新增檔案錯誤！')
-      }
-      var count = 0
-      for (var i = 0; i < length; i++) {
-        rImage.resizeConst(filepath + '/' + i + '.png', filepath + '/resized/' + i + '.png', function () {
-          count += 1
-          if (count === length) {
-            // run Shell Script
-            cmd.runScriptFileOf('bash', 'cmd-tg-bot.sh', _id, length - 1,
-              function (line) { // on data
+  doWork(msg, href, _id);
+});
 
-              },
-              function (line) { // on error
-                return bot.sendMessage(msg.chat.id, 'sorry ! \nthere is some technical issue occur... \nplz message @ji394snoopy')
-              },
-              function (code) { // on close
-                stickerList[_id] = 'https://t.me/addstickers/sudt2' + _id
-                firebase.setValueWith(dbRef, stickerList)
-                return bot.sendMessage(msg.chat.id, 'DONE ! here is your link: https://t.me/addstickers/sudt2' + _id)
-              })
-          }
-        })
-      }
-    })
-  })
-})
-
-dbRef.on('child_added', function (data) {
+dbRef.on('child_added', function() {
   // update list
-  // log('added' + data)
-})
+  // cLog('added' + data)
+});
 
-dbRef.on('child_changed', function (data) {
+dbRef.on('child_changed', function() {
   // update list
-  // log('changed' + data)
-})
+  // cLog('changed' + data)
+});
 
-getList()
-bot.start()
+// getList();
+bot.start();
