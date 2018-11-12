@@ -1,5 +1,5 @@
-const Telebot = require('TeleBot');
-const config = require('./src/config');
+const Telebot = require('telebot');
+// const config = require('./src/config');
 const webhook = require('./src/controller/webhook');
 const server = require('./src/server');
 // set bot key
