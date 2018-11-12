@@ -7,8 +7,14 @@ const emojis = require('../common/emojis');
 
 const regHref = /^(http[s]?:\/\/(www\.)?|ftp:\/\/(www\.)?|www\.){1}([0-9A-Za-z-.@:%_+~#=]+)+((\.[a-zA-Z]{2,3})+)(\/(.)*)?( ? (.)*)?/g;
 const cLog = console.log;
+const startServerTime = Math.floor(new Date().getTime() / 1000);
 
 let stickerList = {};
+
+// 起server前的訊息ignore
+const checkTime = t => {
+  return startServerTime >= Number(t);
+};
 
 // do work
 const doWork = (msg, href, _id) => {
@@ -87,11 +93,13 @@ const doWork = (msg, href, _id) => {
 /* webhook */
 module.exports.set = bot => {
   bot.on('text', msg => {
+    if (checkTime(msg.date)) return;
     cLog('text');
     return bot.sendMessage(msg.from.id, 'get text');
   });
 
   bot.on(/^\/顯示$/, msg => {
+    if (checkTime(msg.date)) return;
     cLog('ls stickers');
     let _stickerList = utils.cloneJson(stickerList);
     let ls = '';
@@ -111,6 +119,7 @@ module.exports.set = bot => {
 
   // add stickers to developer
   bot.on(/^\/上傳 貼圖$/, msg => {
+    if (checkTime(msg.date)) return;
     bot.sendMessage(msg.user.id, MSG.INFO.ZIP_SIZE);
     if (zipList[msg.user.id] && zipList[msg.user.id].isBusy) {
       // stop do work
@@ -130,8 +139,8 @@ module.exports.set = bot => {
    * create sticker set from line href
    */
   bot.on(/^(\/下載Line貼圖 |){1}(\w.+)$/, (msg, props) => {
+    if (checkTime(msg.date)) return;
     cLog(JSON.stringify(msg));
-
     const href = props.match[2];
     // todo: only id
     if (!href.match(regHref))
